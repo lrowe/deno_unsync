@@ -160,7 +160,7 @@ mod test {
     for i in 0..100 {
       let data = data.clone();
       tasks.push(task_queue.run(async move {
-        crate::spawn_blocking(move || {
+        crate::spawn_blocking_optional(move || {
           let mut data = data.lock();
           assert_eq!(*data, i);
           *data = i + 1;

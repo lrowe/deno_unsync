@@ -186,7 +186,7 @@ mod tests {
       let acquire = task_queue.acquire();
       set.spawn(async move {
         let permit = acquire.await;
-        crate::spawn_blocking(move || {
+        crate::spawn_blocking_always(move || {
           let mut data = data.lock().unwrap();
           assert_eq!(i, *data);
           *data = i + 1;

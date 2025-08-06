@@ -5,6 +5,7 @@ use core::task::Context;
 use core::task::Poll;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 use tokio::runtime::Handle;
 use tokio::runtime::RuntimeFlavor;
 
@@ -64,10 +65,28 @@ pub fn spawn<F: Future<Output = R> + 'static, R: 'static>(
   }
 }
 
-/// Equivalent to [`tokio::task::spawn_blocking`]. Currently a thin wrapper around the tokio API, but this
-/// may change in the future.
+/// Deprecated. Use [`spawn_blocking_always`] when running on another thread is necessary for correctness.
+/// Use [`spawn_blocking_optional`] to allow running on the current thread when configured.
 #[inline(always)]
+#[deprecated(
+  since = "0.4.5",
+  note = "use spawn_blocking_always or spawn_blocking_optional as appropriate"
+)]
+#[allow(dead_code)]
 pub fn spawn_blocking<
+  F: (FnOnce() -> R) + Send + 'static,
+  R: Send + 'static,
+>(
+  f: F,
+) -> JoinHandle<R> {
+  spawn_blocking_always(f)
+}
+
+/// Equivalent to [`tokio::task::spawn_blocking`]. Use when the provided closure must be run on another
+/// thread for correctness. Use [`spawn_blocking_optional`] to allow running on the current thread when
+/// configured. Currently a thin wrapper around the tokio API, but this may change in the future.
+#[inline(always)]
+pub fn spawn_blocking_always<
   F: (FnOnce() -> R) + Send + 'static,
   R: Send + 'static,
 >(
@@ -77,6 +96,37 @@ pub fn spawn_blocking<
   JoinHandle {
     handle,
     _r: Default::default(),
+  }
+}
+
+pub type JoinResult<T> = Result<T, tokio::task::JoinError>;
+
+static OPTIONAL_USE_CURRENT_THREAD: OnceLock<bool> = OnceLock::new();
+
+/// Configure whether [`spawn_blocking_optional`] should run on current thread.
+pub fn set_spawn_blocking_optional_use_current_thread(value: bool) {
+  //println!("XXX set_spawn_blocking_optional_use_current_thread({:?})", value);
+  OPTIONAL_USE_CURRENT_THREAD
+    .set(value)
+    .expect("value may only be set once");
+}
+
+/// Equivalent to [`tokio::task::spawn_blocking`] but may be configured to run on the current thread.
+/// Use [`spawn_blocking_always`] when running on another thread is necessary for correctness.
+/// Currently a thin wrapper around the tokio API, but this may change in the future.
+#[inline(always)]
+pub async fn spawn_blocking_optional<
+  F: (FnOnce() -> R) + Send + 'static,
+  R: Send + 'static,
+>(
+  f: F,
+) -> JoinResult<R> {
+  if *OPTIONAL_USE_CURRENT_THREAD.get_or_init(|| false) {
+    Ok(f())
+  } else {
+    let result =
+      tokio::task::spawn_blocking(|| MaskResultAsSend { result: f() }).await?;
+    Ok(result.into_inner())
   }
 }
 
